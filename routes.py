@@ -1,4 +1,5 @@
 from flask import Blueprint, request, jsonify
+from sqlalchemy.exc import IntegrityError
 from models import db, Meter
 
 meter_bp = Blueprint("meter_bp", __name__)
@@ -17,7 +18,12 @@ def create_meter():
 
     meter = Meter(name=name)
     db.session.add(meter)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # Covers the race where the same name is inserted between check and commit.
+        db.session.rollback()
+        return jsonify({"error": "meter name already exists"}), 409
 
     return jsonify(meter.to_dict()), 201
 
@@ -30,7 +36,7 @@ def get_all_meters():
 
 @meter_bp.route("/meters/<int:meter_id>", methods=["GET"])
 def get_meter(meter_id):
-    meter = Meter.query.get(meter_id)
+    meter = db.session.get(Meter, meter_id)
     if not meter:
         return jsonify({"error": "meter not found"}), 404
 
@@ -39,7 +45,7 @@ def get_meter(meter_id):
 
 @meter_bp.route("/meters/<int:meter_id>", methods=["PUT"])
 def update_meter(meter_id):
-    meter = Meter.query.get(meter_id)
+    meter = db.session.get(Meter, meter_id)
     if not meter:
         return jsonify({"error": "meter not found"}), 404
 
@@ -54,7 +60,11 @@ def update_meter(meter_id):
         return jsonify({"error": "meter name already exists"}), 409
 
     meter.name = name
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "meter name already exists"}), 409
 
     return jsonify({
         "meter_id": meter.meter_id,
@@ -65,7 +75,7 @@ def update_meter(meter_id):
 
 @meter_bp.route("/meters/<int:meter_id>", methods=["DELETE"])
 def delete_meter(meter_id):
-    meter = Meter.query.get(meter_id)
+    meter = db.session.get(Meter, meter_id)
     if not meter:
         return jsonify({"error": "meter not found"}), 404
 
